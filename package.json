@@ -1,0 +1,18 @@
+{
+  "name": "@ai-ecoverse/jev-omni.js",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Jev-Omni decision classifier running in the browser on WebGPU",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "smoke:webgpu": "node scripts/webgpu-smoke.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "onnxruntime-web": "1.30.0"
+  }
+}

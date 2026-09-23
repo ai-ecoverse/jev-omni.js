@@ -1,0 +1,11 @@
+build/
+dist/
+public/models/
+node_modules/
+__pycache__/
+.venv/
+.env.local
+.env
+*.tgz
+test-results/
+playwright-report/
