@@ -1,22 +1,52 @@
 {
   "name": "@ai-ecoverse/jev-omni.js",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.0.0-development",
   "description": "Jev-Omni decision classifier running in the browser on WebGPU",
+  "keywords": [
+    "jev-omni",
+    "gemma-4",
+    "decision-model",
+    "classification",
+    "calibration",
+    "multimodal",
+    "onnxruntime",
+    "webgpu"
+  ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ai-ecoverse/jev-omni.js.git"
+  },
+  "homepage": "https://ai-ecoverse.github.io/jev-omni.js/",
   "type": "module",
-  "main": "./src/index.ts",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20.9"
   },
   "scripts": {
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "prepack": "npm run build:lib",
     "typecheck": "tsc --noEmit -p .",
     "test": "node --import tsx --test test/*.test.ts",
     "eval:browser": "node --import tsx scripts/browser-eval.ts",
     "smoke:webgpu": "node scripts/webgpu-smoke.mjs",
     "dev:demo": "vite site",
     "build:demo": "vite build site",
-    "preview:demo": "vite preview site"
+    "preview:demo": "vite preview site",
+    "release": "semantic-release"
   },
   "dependencies": {
     "@huggingface/tokenizers": "^0.2.0"
@@ -26,11 +56,18 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
     "@types/node": "^26.0.0",
     "onnxruntime-node": "^1.30.0",
     "onnxruntime-web": "1.30.0",
+    "semantic-release": "^25.0.9",
     "tsx": "^4.20.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

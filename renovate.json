@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "export/ pins the transformers and torch versions the vendored onnxruntime-genai builder was patched against. No CI job builds the export, so a bump here would be untested.",
+      "matchFileNames": ["export/**"],
+      "enabled": false
+    }
+  ]
+}
