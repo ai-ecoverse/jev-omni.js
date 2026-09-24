@@ -92,7 +92,7 @@ plus 137 GUI-360 screenshot questions (`build/eval/dvb-{torch,webgpu}.jsonl`):
 
 | | WebGPU int8, median / p90 | PyTorch fp32 MPS, median / p90 |
 |---|---|---|
-| image embed (preprocessing + vision graph, 256-280 soft tokens) | 31 / 45 ms | 5 / 5 ms |
+| image embed (preprocessing + vision graph, 256-280 soft tokens) | 31 / 45 ms | 13 / 15 ms (processor 8 ms + embedder 5 ms) |
 | decoder, kev-vision question (median 338 tokens) | 1.23 / 1.34 s | 0.79 / 0.83 s |
 | decoder, GUI-360 question (median 419 tokens) | 1.55 / 2.18 s | 1.05 / 1.25 s |
 
