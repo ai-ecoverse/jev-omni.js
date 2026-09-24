@@ -23,6 +23,14 @@ Background: [docs/phase0-feasibility.md](docs/phase0-feasibility.md).
   [microsoft/onnxruntime-genai PR #2473](https://github.com/microsoft/onnxruntime-genai/pull/2473) (MIT) at
   `export/vendor/ortgenai_models_pr2473`.
 
+## Related
+
+- [kev.js](https://github.com/ai-ecoverse/kev.js): Kev decision models in the browser; this repo follows its export
+  pipeline and layout. Its `-vision` bundles answer questions about images through Qwen3.5's vision tower.
+- [cua-s1.js](https://github.com/ai-ecoverse/cua-s1.js): Cua's form-filling and next-action models in the browser.
+- [decision-vision-bench](https://github.com/ai-ecoverse/decision-vision-bench): Jev-Omni, Kev vision and
+  cua-s1-4b-0.2 multimodal on one mixed image decision set.
+
 ## License
 
 Apache-2.0, following Jev-Omni and Gemma 4.
