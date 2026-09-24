@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>jev-omni.js — a 12B decision classifier in the browser</title>
+  <meta name="description" content="Jev-Omni, a Gemma 4 12B decision classifier, running in the browser on WebGPU. A state, a question and options in; one calibrated probability per option out." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◑</text></svg>" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="hero">
+    <h1>jev-omni.js</h1>
+    <p class="tagline">A 12B decision classifier in the browser. A state, a question and its options in; one probability per option out, from a single forward pass on your GPU.</p>
+    <p class="sub">
+      <a href="https://huggingface.co/akhilaaa3/Jev-Omni">Jev-Omni</a> is a Gemma 4 12B model with a 256-way decision
+      head. <code>@ai-ecoverse/jev-omni.js</code> runs it on WebGPU through onnxruntime-web, for text and images.
+    </p>
+    <nav>
+      <a href="#status">Status</a><a href="#results">Results</a><a href="#api">API</a><a href="#how">How it works</a><a href="#compare">Compared</a>
+      <a href="https://github.com/ai-ecoverse/jev-omni.js">GitHub</a>
+      <a href="https://ai-ecoverse.github.io/kev.js/">kev.js</a>
+      <a href="https://ai-ecoverse.github.io/cua-s1.js/">cua-s1.js</a>
+      <a href="https://github.com/ai-ecoverse/decision-vision-bench">decision-vision-bench</a>
+      <a href="https://github.com/ai-ecoverse">AI Ecoverse</a>
+      <a href="https://www.sliccy.com">SLICC</a>
+    </nav>
+  </header>
+
+  <section id="status">
+    <h2>Status</h2>
+    <p class="panel">
+      <strong>Work in progress, no live demo yet.</strong> Text and images work in Chrome on WebGPU and match the
+      full-precision model. The browser bundle is 13.6 GB and needs about 16 GB of GPU memory, so it is for machines
+      like a large-memory Apple Silicon Mac. The weights are not on Hugging Face yet; until they are, you build the
+      bundle yourself (see the <a href="https://github.com/ai-ecoverse/jev-omni.js#readme">README</a>). Video and
+      audio are still to come.
+    </p>
+  </section>
+
+  <section id="results">
+    <h2>Results</h2>
+    <p class="note">Chrome on WebGPU, Apple M4 Max, int8 weights with fp32 activations, against the fp32 PyTorch model.</p>
+    <table class="api">
+      <tr><th>Set</th><th>Accuracy, browser / reference</th><th>Answers changed</th><th>Mean / max |Δp|</th></tr>
+      <tr><td>DecisionBench medium, 293 text questions</td><td>86.35% / 86.35%</td><td>0</td><td>0.0019 / 0.131</td></tr>
+      <tr><td>kev.js vision-v1, 106 image questions</td><td>98.1% / 99.1%</td><td>1</td><td>0.0014 / –</td></tr>
+      <tr><td>kev.js vision-v2, 128 harder image questions</td><td>85.2% / 85.2%</td><td>1</td><td>0.0037 / 0.065</td></tr>
+    </table>
+    <p class="note">
+      Latency on a quiet GPU: about 1.2–1.6 s per image question (31 ms for the image step), about 7 s for a text
+      question under 2k tokens, up to 57 s for 9k tokens. Details: <a href="https://github.com/ai-ecoverse/jev-omni.js/blob/main/docs/phase1-text.md">text</a>,
+      <a href="https://github.com/ai-ecoverse/jev-omni.js/blob/main/docs/phase2-images.md">images</a>,
+      <a href="https://github.com/ai-ecoverse/jev-omni.js/blob/main/docs/phase0-feasibility.md">feasibility</a>.
+    </p>
+  </section>
+
+  <section id="api">
+    <h2>API</h2>
+<pre><code>import * as ort from "onnxruntime-web/webgpu";
+import { loadJevOmni } from "@ai-ecoverse/jev-omni.js";
+
+const jev = await loadJevOmni("/models/jev-omni", { ort });
+const res = await jev.predict({
+  state: "The meeting starts at 10 AM. It is now 9 AM.",
+  question: "Has the meeting started?",
+  options: ["Yes", "No"],
+  // image: { width, height, data }   // optional RGBA pixels
+});
+res.prediction;      // the likeliest option
+res.probabilities;   // { Yes: …, No: … }</code></pre>
+    <p class="note">2 to 256 options per question; quality is established up to 20. The loader checks every file's SHA-256 against the manifest.</p>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <ul>
+      <li><strong>Decoder:</strong> Jev-Omni's own bf16 weights, exported with a vendored draft of the onnxruntime-genai model builder that supports Gemma 4, as a hidden-state graph with int8 weights and fp32 activations. The 8 global-attention layers run in fp16 to fit Apple GPUs' workgroup memory.</li>
+      <li><strong>Head:</strong> the last position's hidden state, normalized, through one linear layer to 256 logits, masked to the number of options.</li>
+      <li><strong>Images:</strong> Gemma 4 has no separate vision tower. Images become 48 px patches through a small embedder (200 MB, fp32), ported to JS with pixel checks against Hugging Face's processor, and tokens of one image attend to each other in both directions.</li>
+    </ul>
+  </section>
+
+  <section id="compare">
+    <h2>Compared with kev.js and cua-s1.js</h2>
+    <p>
+      In <a href="https://github.com/ai-ecoverse/decision-vision-bench">decision-vision-bench</a>, Jev-Omni ties
+      Kev-4B vision on image questions, at 2.5× the download. It is clearly the strongest of the three on long text
+      decisions (92.5% on the DecisionBench slice). For images in the browser, use
+      <a href="https://ai-ecoverse.github.io/kev.js/">kev.js</a>; for long text decisions on a big machine, use this.
+    </p>
+  </section>
+
+  <footer>
+    Jev-Omni by akhilaaa3 (Apache-2.0), on Google's Gemma 4. Jev-Omni states that it is independent of TypeSafe AI's Jev.
+    Code: <a href="https://github.com/ai-ecoverse/jev-omni.js">ai-ecoverse/jev-omni.js</a>, Apache-2.0.
+  </footer>
+</body>
+</html>
