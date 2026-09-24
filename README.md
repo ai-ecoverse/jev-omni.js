@@ -10,6 +10,37 @@ embedder, the bundle matches the reference on 232 of 234 kev-vision questions, a
 ([docs/phase2-images.md](docs/phase2-images.md)). Video and audio are not done yet.
 Background: [docs/phase0-feasibility.md](docs/phase0-feasibility.md).
 
+**Demo:** <https://ai-ecoverse.github.io/jev-omni.js/>. It downloads 13.6 GB of weights on first use and needs
+Chrome with WebGPU and plenty of memory; it has only been tested on an M4 Max with 128 GB. The weights are on
+Hugging Face at [ai-ecoverse/jev-omni.js](https://huggingface.co/ai-ecoverse/jev-omni.js).
+
+## Quick start
+
+```js
+import * as ort from "onnxruntime-web/webgpu"; // onnxruntime-web 1.30.0
+import { loadJevOmni } from "@ai-ecoverse/jev-omni.js";
+
+const jev = await loadJevOmni("https://huggingface.co/ai-ecoverse/jev-omni.js/resolve/main/jev-omni", { ort });
+const res = await jev.predict({
+  state: "The meeting starts at 10 AM. It is now 9 AM.",
+  question: "Has the meeting started?",
+  options: ["Yes", "No"],
+  // image: { width, height, data }   // optional RGBA pixels
+});
+res.prediction; // "No"
+res.probabilities; // { Yes: …, No: … }
+```
+
+- 2 to 256 options per question; quality is established up to 20.
+- The loader checks each downloaded file's SHA-256 against the manifest and keeps the files in Cache Storage under
+  the manifest's revision. Later loads read from disk; a new revision replaces the old files.
+- Run it in a Web Worker, as the demo does (`site/worker.ts`).
+- Prompt length: with onnxruntime-web 1.30, attention needs an n×n buffer per head, so prompts are capped at about
+  8,000 tokens on a GPU with 4 GB buffers. `jev.maxTokens` holds the cap for the current GPU, and longer prompts are
+  rejected with an error instead of failing inside the runtime.
+
+To run the demo locally against a bundle in `public/models/jev-omni`: `npm run dev:demo`.
+
 ## Credits
 
 - [Jev-Omni](https://huggingface.co/akhilaaa3/Jev-Omni) by akhilaaa3, Apache-2.0: the fine-tuned Gemma 4 12B
