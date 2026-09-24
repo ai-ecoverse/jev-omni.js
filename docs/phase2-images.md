@@ -87,21 +87,20 @@ mistakes: 18 questions are answered correctly by only one of them.
 
 ## Latency (Apple M4 Max, 128 GB, Playwright Chromium, headless)
 
-These runs shared the GPU with other work: 10 training processes and the decision-vision-bench browser runs, with
-GPU utilization at 97%. The numbers below are measured under that load.
+Measured on a quiet GPU (no other GPU jobs), in the decision-vision-bench runs of the same 234 kev-vision questions
+plus 137 GUI-360 screenshot questions (`build/eval/dvb-{torch,webgpu}.jsonl`):
 
-| | median | p90 |
+| | WebGPU int8, median / p90 | PyTorch fp32 MPS, median / p90 |
 |---|---|---|
-| image embed (preprocessing + vision graph, 256-280 soft tokens) | 54 ms (v1), 59 ms (v2) | 78-81 ms |
-| decoder, image question (about 330-360 tokens) | 4.5 s | 5.6 s |
-| PyTorch fp32 MPS decoder, image question (quieter machine) | 1.5-1.6 s | |
+| image embed (preprocessing + vision graph, 256-280 soft tokens) | 31 / 45 ms | 5 / 5 ms |
+| decoder, kev-vision question (median 338 tokens) | 1.23 / 1.34 s | 0.79 / 0.83 s |
+| decoder, GUI-360 question (median 419 tokens) | 1.55 / 2.18 s | 1.05 / 1.25 s |
 
-To separate the load from the graph change, the same 4 DecisionBench questions (2.9k-3.0k tokens) ran alternately
-through the Phase 1 text graph and the new graph, twice each. Medians were 26.3 s and 26.7 s, with identical
-probabilities, so the `If` branches cost nothing measurable. The same 4 questions took 14.4-15.2 s in Phase 1 on an
-idle GPU, so the load slowed everything down by about 1.75×. Scaled by that factor, an image question should take
-about 2.5 s on an idle M4 Max. That fits the 1.8-2.8 s decoder times in the first smoke test. A matched
-measurement is left to the decision-vision-bench runs, which time all three models on the same machine.
+The earlier kev-vision runs (`web-q8f32-vision-v*.jsonl`) shared the GPU with 10 training processes and other
+browser runs, at 97% utilization, and took 4.5 s median per question; their accuracy numbers are unaffected. To check
+that the image-capable graph does not slow down text, the same 4 DecisionBench questions (2.9k-3.0k tokens) ran
+alternately through the Phase 1 text graph and the new graph under the same load, twice each: medians 26.3 s and
+26.7 s, with identical probabilities. The `If` branches cost nothing measurable.
 
 ## Verdict against Kev
 
@@ -110,7 +109,8 @@ On these two sets, Jev-Omni does not beat Kev-4B enough to justify its cost:
 - accuracy is the same within noise: +0.9 points on v1 and -2.3 points on v2 (PyTorch), with overlapping intervals;
 - it has the same weakness, counting, and is slightly worse at it on v2 (0.600 vs 0.675);
 - the bundle is 13.6 GB against Kev-4B's about 5.4 GB;
-- an image question takes about 2.5 s against Kev-4B's 0.7-1.6 s. A long text question takes about 10 s.
+- an image question takes about 1.2-1.6 s, in the range of Kev-4B's 0.7-1.6 s, so speed is not the problem; size is.
+  A long text question takes about 10 s.
 
 What Jev-Omni adds is a different model family whose mistakes only partly overlap Kev's (18 of 234 questions are
 answered correctly by only one model), its text accuracy on DecisionBench (Phase 1), and its audio and video paths.
