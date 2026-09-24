@@ -1,6 +1,6 @@
 {
   "name": "@ai-ecoverse/jev-omni.js",
-  "version": "0.0.0-development",
+  "version": "0.1.0",
   "description": "Jev-Omni decision classifier running in the browser on WebGPU",
   "keywords": [
     "jev-omni",
