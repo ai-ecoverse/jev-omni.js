@@ -1,7 +1,7 @@
 # Phase 0: feasibility
 
 Status: **export works on a reduced model; the full build is blocked on disk space** (35 GB free, about 80 GB
-needed for a safe run).
+needed for a safe run). Update: disk was freed and the full build is done, see [phase1-text.md](phase1-text.md).
 
 ## Pinned revisions
 

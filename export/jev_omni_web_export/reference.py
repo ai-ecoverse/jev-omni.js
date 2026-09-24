@@ -84,6 +84,9 @@ def main():
             t0 = time.time()
             probs, hidden = run(text, head, r["ids"], len(r["options"]), a.device, a.mode)
             ms = (time.time() - t0) * 1000
+            if a.device == "mps":
+                # The MPS caching allocator keeps a heap per distinct sequence length and OOMs after ~150 prompts.
+                torch.mps.empty_cache()
             f.write(json.dumps({"id": r["id"], "probs": probs, "hidden": hidden, "ms": round(ms), "tokens": len(r["ids"])}) + "\n")
             f.flush()
             print(f"[{len(done) + i + 1}/{len(records)}] {r['id']} {len(r['ids'])} tok {ms:.0f} ms  p[label]={probs[r['label']]:.3f}", flush=True)

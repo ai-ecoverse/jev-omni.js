@@ -4,7 +4,9 @@
 style of [kev.js](https://github.com/ai-ecoverse/kev.js). Supply a state, a question and 2–256 options, and get one
 probability per option from a single forward pass.
 
-Work in progress. See [docs/phase0-feasibility.md](docs/phase0-feasibility.md) for the current state.
+Work in progress. Text works: the 13.3 GB int8 bundle matches the fp32 reference on all 293 DecisionBench medium
+questions in Chrome on WebGPU ([docs/phase1-text.md](docs/phase1-text.md)). Images, video and audio are not done yet.
+Background: [docs/phase0-feasibility.md](docs/phase0-feasibility.md).
 
 ## Credits
 
