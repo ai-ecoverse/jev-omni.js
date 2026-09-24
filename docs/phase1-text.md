@@ -26,6 +26,12 @@ Two things are needed for prompts longer than about 2.8k tokens on Apple GPUs:
   the same overflowing n² kernel. In fp16 the tile fits. On the reduced test model this cost a mean |Δp| of 0.003 and
   no flips. The table below includes its effect, together with int8, on the real model.
 
+Update: the package now pins the stable `onnxruntime-web@1.30.0`. Rechecked on 1.30.0 with the same bundle, prompts
+up to 8,173 tokens run and give the same answers as the reference (max |Δp| vs PyTorch 0.027); 8,937 tokens fail
+with "Integer overflow", because a 16-head n×n fp32 attention buffer exceeds 4 GiB above 8,191 tokens. The loader
+computes that cap from the GPU's buffer limits (`jev.maxTokens`) and rejects longer prompts with a clear error. The
+numbers below were measured on the 1.31 dev build.
+
 `embed_scale` is overridden to 62.0 (the value in `runtime_buffers.pt`, and what Jev-Omni runs with) instead of the
 builder's √3840 = 61.97.
 

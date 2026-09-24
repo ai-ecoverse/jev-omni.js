@@ -40,7 +40,16 @@ try {
       if (JSON.stringify(ids) !== JSON.stringify(r.ids)) throw new Error(`${r.id}: in-browser encoding differs from the eval set`);
       encodeChecked++;
     }
-    const res = await page.evaluate(([ids, n]) => window.jevRun(ids as number[], n as number), [r.ids, r.options.length]);
+    let res;
+    try {
+      res = await page.evaluate(([ids, n]) => window.jevRun(ids as number[], n as number), [r.ids, r.options.length]);
+    } catch (err) {
+      // recorded, so a length probe can see where a runtime gives up; the next question still runs
+      const error = (err as Error).message.split("\n")[0];
+      appendFileSync(a.out, JSON.stringify({ id: r.id, tokens: r.ids.length, error }) + "\n");
+      console.log(`[${done.size + i + 1}/${records.length}] ${r.id} ${r.ids.length} tok FAILED: ${error}`);
+      continue;
+    }
     appendFileSync(a.out, JSON.stringify({ id: r.id, probs: res.probs, hidden: res.hidden, ms: Math.round(res.ms), tokens: r.ids.length }) + "\n");
     console.log(`[${done.size + i + 1}/${records.length}] ${r.id} ${r.ids.length} tok ${Math.round(res.ms)} ms`);
   }

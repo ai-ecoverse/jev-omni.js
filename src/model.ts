@@ -16,6 +16,8 @@ export interface VariantManifest { model: string; data: string[]; inputs: string
 
 export interface JevManifest {
   name: string;
+  /** digest of every file the manifest lists; clients key their cache by it (older bundles: absent) */
+  revision?: string;
   model: { repo: string; revision: string };
   base: { repo: string; revision: string };
   files: { tokenizer: string; tokenizer_config: string; head: string };
@@ -54,6 +56,8 @@ const round1 = (x: number) => Math.round(x * 10) / 10;
 export class JevOmni {
   readonly manifest: JevManifest;
   readonly variant: string;
+  /** longest prompt, in tokens, this runtime and GPU can run (Infinity when unknown); longer prompts are rejected */
+  readonly maxTokens: number;
   readonly tokenizer: Tokenizer;
   private ort: OrtModule;
   private session: InferenceSession;
@@ -61,7 +65,8 @@ export class JevOmni {
   private head: DecisionHead;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(a: { ort: OrtModule; session: InferenceSession; head: DecisionHead; tokenizer: Tokenizer; manifest: JevManifest; variant: string; vision?: InferenceSession | null }) {
+  constructor(a: { ort: OrtModule; session: InferenceSession; head: DecisionHead; tokenizer: Tokenizer; manifest: JevManifest; variant: string; vision?: InferenceSession | null; maxTokens?: number }) {
+    this.maxTokens = a.maxTokens ?? Infinity;
     this.ort = a.ort; this.session = a.session; this.head = a.head; this.tokenizer = a.tokenizer;
     this.manifest = a.manifest; this.variant = a.variant; this.vision = a.vision ?? null;
   }
@@ -109,6 +114,9 @@ export class JevOmni {
 
   private async run(ids: number[], image?: ImageFeatures): Promise<Float32Array> {
     const n = ids.length;
+    if (n > this.maxTokens) {
+      throw new Error(`The prompt is ${n} tokens; on this GPU, onnxruntime-web can run at most ${this.maxTokens}. Shorten the state or the options.`);
+    }
     const T = this.ort.Tensor;
     const d = this.head.hidden;
     const feeds: Record<string, Tensor> = {

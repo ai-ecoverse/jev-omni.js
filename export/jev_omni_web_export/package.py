@@ -29,6 +29,16 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def with_revision(manifest: dict) -> dict:
+    """The manifest with `revision`, a digest of every file it lists, right after `name`. Files are republished under
+    the same r-<jev revision>/ paths when only the graph changes, so browsers key their cache by this instead."""
+    h = hashlib.sha256()
+    for f in sorted(manifest["sha256"]):
+        h.update(f"{f}\0{manifest['sha256'][f]}\n".encode())
+    items = [(k, v) for k, v in manifest.items() if k != "revision"]
+    return dict(items[:1] + [("revision", h.hexdigest()[:16])] + items[1:])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--snapshot", type=Path, required=True, help="Jev-Omni snapshot (head.pt, tokenizer files)")
@@ -96,11 +106,13 @@ def main():
     if a.parity:
         manifest["variants"][a.variant]["parity"] = json.loads(a.parity.read_text())
 
+    manifest["sizes"], manifest["sha256"] = {}, {}   # everything lives under root, so this drops only removed files
     for p in sorted(root.rglob("*")):
         if p.is_file():
             rel = str(p.relative_to(a.out))
             manifest["sizes"][rel] = p.stat().st_size
             manifest["sha256"][rel] = sha256(p)
+    manifest = with_revision(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=1))
     total = sum(manifest["sizes"][f] for f in [manifest["variants"][a.variant]["model"], *manifest["variants"][a.variant]["data"]])
     print(f"{manifest_path}: {a.variant} {len(data)} data files, {total / 1e9:.2f} GB")
