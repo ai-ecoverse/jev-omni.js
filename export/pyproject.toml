@@ -2,7 +2,7 @@
 name = "jev-omni-web-export"
 version = "0.1.0"
 description = "Export Jev-Omni (Gemma 4 12B unified decision classifier) to ONNX for the browser runtime"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     # The model builder is vendored from microsoft/onnxruntime-genai PR #2473 (Gemma 4 text support) at
     # vendor/ortgenai_models_pr2473; the released onnxruntime-genai 0.16 stops at Gemma 3.
