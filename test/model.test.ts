@@ -33,3 +33,35 @@ test("hidden states and probabilities match the Python run", { skip: !ready && "
   }
   await jev.release();
 });
+
+/** fetch over the bundle directory; `fail(path, attempt)` returns an error to throw or an HTTP status to answer with. */
+function bundleFetch(fail: (path: string, attempt: number) => Error | number | undefined) {
+  const attempts = new Map<string, number>();
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input).replace("https://example.test/b/", "");
+    const n = (attempts.get(path) ?? 0) + 1;
+    attempts.set(path, n);
+    const f = fail(path, n);
+    if (f instanceof Error) throw f;
+    if (typeof f === "number") return new Response(null, { status: f });
+    return new Response(await readFile(`${BUNDLE}/${path}`));
+  };
+  return { fetch: fetch as typeof globalThis.fetch, attempts };
+}
+
+test("a URL load retries files whose download fails", { skip: !existsSync(`${BUNDLE}/manifest.json`) && "no bundle" }, async (t) => {
+  const f = bundleFetch((path, n) => (path !== "manifest.json" && n === 1 ? new TypeError("Failed to fetch") : undefined));
+  t.mock.method(globalThis, "fetch", f.fetch);
+  const jev = await loadJevOmni("https://example.test/b", { ort: ort as unknown as OrtModule, variant: VARIANT, executionProviders: ["cpu"], vision: false });
+  await jev.release();
+  const files = [...f.attempts].filter(([p]) => p !== "manifest.json");
+  assert.ok(files.length > 3);
+  assert.ok(files.every(([, n]) => n === 2), JSON.stringify(files));
+});
+
+test("a URL load fails at once on a missing file", { skip: !existsSync(`${BUNDLE}/manifest.json`) && "no bundle" }, async (t) => {
+  const f = bundleFetch((path) => (path.endsWith("head.safetensors") ? 404 : undefined));
+  t.mock.method(globalThis, "fetch", f.fetch);
+  await assert.rejects(loadJevOmni("https://example.test/b", { ort: ort as unknown as OrtModule, variant: VARIANT, executionProviders: ["cpu"], vision: false }), /HTTP 404/);
+  assert.equal([...f.attempts].find(([p]) => p.endsWith("head.safetensors"))?.[1], 1);
+});

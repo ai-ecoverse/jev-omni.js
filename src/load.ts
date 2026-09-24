@@ -35,6 +35,8 @@ export interface LoadOptions {
   vision?: boolean;
   /** files fetched at once from a URL (default 4) */
   concurrency?: number;
+  /** retries per file after a failed download (default 5, with backoff from 1 s to 30 s) */
+  retries?: number;
   /** longest prompt to accept, in tokens; default: what the WebGPU adapter's buffer limit allows (webgpuTokenLimit) */
   maxTokens?: number;
 }
@@ -140,9 +142,32 @@ async function pool<T>(jobs: (() => Promise<T>)[], limit: number): Promise<T[]> 
   const out = new Array<T>(jobs.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, async () => {
-    for (let i = next++; i < jobs.length; i = next++) out[i] = await jobs[i]();
+    try {
+      for (let i = next++; i < jobs.length; i = next++) out[i] = await jobs[i]();
+    } catch (e) {
+      next = jobs.length;   // stop the other workers: a retry of the load should not race leftover downloads
+      throw e;
+    }
   }));
   return out;
+}
+
+class HttpError extends Error {
+  constructor(url: string, readonly status: number) { super(`${url}: HTTP ${status}`); }
+}
+
+/** Retry a download on network errors, truncated or corrupt bodies, 429 and 5xx: over a 13.6 GB download on a slow
+ * link, one dropped connection is likely, and it should not throw away the rest. Other HTTP errors fail at once. */
+async function withRetries<T>(retries: number, job: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await job();
+    } catch (e) {
+      const permanent = e instanceof HttpError && e.status !== 429 && e.status < 500;
+      if (permanent || attempt >= retries) throw e;
+      await new Promise((r) => setTimeout(r, Math.min(30_000, 1000 * 2 ** attempt)));
+    }
+  }
 }
 
 type FileReader = (path: string, bytes?: number, sha?: string) => Promise<Uint8Array>;
@@ -170,11 +195,15 @@ function urlReader(baseUrl: string, rev: string, o: LoadOptions): FileReader {
       if (bytes === undefined || data.length === bytes) return data;
       await cache!.delete(key);   // truncated entry: fetch it again
     }
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-    const data = await readResponse(res, path, o.onProgress, bytes);
-    if (bytes !== undefined && data.length !== bytes) throw new Error(`${path}: expected ${bytes} bytes, received ${data.length}`);
-    if (sha !== undefined && o.verify !== false) await checkSha(path, data, sha);
+    const data = await withRetries(o.retries ?? 5, async () => {
+      if (bytes !== undefined) o.onProgress?.({ file: path, loaded: 0, total: bytes });
+      const res = await fetch(url);
+      if (!res.ok) throw new HttpError(url, res.status);
+      const got = await readResponse(res, path, o.onProgress, bytes);
+      if (bytes !== undefined && got.length !== bytes) throw new Error(`${path}: expected ${bytes} bytes, received ${got.length}`);
+      if (sha !== undefined && o.verify !== false) await checkSha(path, got, sha);
+      return got;
+    });
     if (cache) {
       try { await cache.put(key, new Response(data as BodyInit, { headers: { "content-length": String(data.length) } })); } catch { /* quota: run uncached */ }
     }

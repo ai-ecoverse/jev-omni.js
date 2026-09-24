@@ -94,7 +94,11 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
   } else if (m.type === "error") {
     $("progress").classList.remove("active");
     if (m.id !== undefined) { pending.get(m.id)?.reject(new Error(m.message)); pending.delete(m.id); }
-    else { status(`Error: ${m.message}`, "err"); setBusy(false); }
+    else {
+      status(`Error: ${m.message}. Files downloaded so far stay in the cache; load again to continue from there.`, "err");
+      void refreshLoadButton(false);
+      setBusy(false);
+    }
   }
 };
 
