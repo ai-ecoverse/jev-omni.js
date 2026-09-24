@@ -15,6 +15,7 @@
 - The rotary caches are sized for 262k positions; --rope-positions trims them.
 - --global-attn-fp16 runs the 8 full-attention layers' attention in fp16 (see fp16_global_attention); WebGPU
   cannot run them past ~2.8k tokens otherwise.
+- --image-mask adds the image inputs and the per-layer image attention path (image_graph.py).
 - Jev-Omni answers in one pass, so the graph is made single-pass: the past KV inputs are removed (optional GQA
   inputs) and `hidden_states` is the only output. The presents are then intermediates that onnxruntime frees
   layer by layer; as outputs they would hold every layer's KV at once (about 6 GB at 9k tokens).
@@ -26,6 +27,8 @@ import shutil
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
+
+from . import image_graph
 
 
 def strip_sliding_window_cache(g) -> int:
@@ -196,6 +199,9 @@ def main():
     ap.add_argument("--rope-positions", type=int, default=16384)
     ap.add_argument("--shard-mb", type=int, default=32)
     ap.add_argument("--global-attn-fp16", action="store_true", help="needed for WebGPU; see fp16_global_attention")
+    ap.add_argument("--image-mask", choices=["none", "block", "causal"], default="block",
+                    help="add the image path (image_graph.py); block/causal: the full-attention layers' image mask")
+    ap.add_argument("--window", type=int, default=1024, help="sliding window, for the image mask")
     ap.add_argument("--delete-src-data", action="store_true",
                     help="remove the builder's model.onnx.data once it is loaded, so src and out never coexist on disk")
     a = ap.parse_args()
@@ -208,6 +214,9 @@ def main():
     print("past inputs removed:", single_pass(g))
     if a.global_attn_fp16:
         print("global attention layers in fp16:", fp16_global_attention(g))
+    if a.image_mask != "none":
+        counts = image_graph.rewrite(m, a.image_mask, a.window)
+        print(f"image path: {counts['sliding']} sliding + {counts['full']} full attention layers with an image mask")
     if in_place:
         onnx.save(m, f"{a.src}/model.onnx")
         return

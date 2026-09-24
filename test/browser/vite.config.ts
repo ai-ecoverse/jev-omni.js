@@ -1,11 +1,13 @@
-// Harness server for scripts/browser-eval.ts: the page, onnxruntime-web's wasm at /ort/, and a bundle directory
-// (JEV_BUNDLE) at /models/, streamed from disk.
+// Harness server for scripts/browser-eval.ts and scripts/predict.ts: the page, onnxruntime-web's wasm at /ort/, a
+// bundle directory (JEV_BUNDLE) at /models/, and local files (images) at /abs/, streamed from disk.
 import { createReadStream, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
 const bundle = resolve(process.env.JEV_BUNDLE ?? "public/models/jev-omni");
 const ortDist = resolve("node_modules/onnxruntime-web/dist");
+// images and reference files named by absolute path in request files (scripts/predict.ts) are served under /abs/
+const filesRoot = resolve(process.env.JEV_FILES_ROOT ?? "/");
 
 function serve(prefix: string, dir: string): Plugin {
   return {
@@ -28,5 +30,5 @@ export default defineConfig({
   root: "test/browser",
   server: { port: Number(process.env.JEV_PORT ?? 5175), strictPort: true, fs: { allow: [resolve(".")] } },
   optimizeDeps: { exclude: ["onnxruntime-web"] },
-  plugins: [serve("/models", bundle), serve("/ort", ortDist)],
+  plugins: [serve("/models", bundle), serve("/ort", ortDist), serve("/abs", filesRoot)],
 });

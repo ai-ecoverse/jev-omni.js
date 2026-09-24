@@ -1,5 +1,6 @@
 """Lay out a browser bundle: manifest.json at the root, then r-<rev>/{tokenizer.json, tokenizer_config.json,
-head.safetensors} and r-<rev>/<variant>/{model.onnx, model.onnx.data*}.
+head.safetensors}, r-<rev>/<variant>/{model.onnx, model.onnx.data*} and, with --vision-dir,
+r-<rev>/vision/{vision.onnx, vision.onnx.data*} (shared by all variants).
 
 The manifest pins the Jev-Omni and base revisions, lists every file with its size and SHA-256 (the loader checks
 both), records the graph's inputs and the head's shape, and carries parity numbers when given. Variants are moved
@@ -37,6 +38,8 @@ def main():
     ap.add_argument("--parity", type=Path, help="compare.py output to record")
     ap.add_argument("--revision", default=JEV["revision"])
     ap.add_argument("--head", type=Path, help="head.pt, default <snapshot>/head.pt")
+    ap.add_argument("--vision-dir", type=Path, help="vision_export output (vision.onnx, vision.onnx.data*)")
+    ap.add_argument("--vision-parity", type=Path, help="parity_image.py output to record for the image path")
     a = ap.parse_args()
     rev = f"r-{a.revision[:7]}"
     root = a.out / rev
@@ -55,13 +58,35 @@ def main():
     manifest["head"] = {"hidden": int(head["linear.weight"].shape[1]), "classes": int(head["linear.weight"].shape[0])}
 
     vdir = root / a.variant
-    if vdir.exists():
-        shutil.rmtree(vdir)
-    vdir.mkdir()
     data = sorted((p for p in a.variant_dir.iterdir() if p.name.startswith("model.onnx.data")),
                   key=lambda p: int(p.name.rpartition("_")[2]) if "_" in p.name else 0)
-    for p in [a.variant_dir / "model.onnx", *data]:
-        shutil.move(str(p), vdir / p.name)
+    if a.variant_dir.resolve() != vdir.resolve():   # else: refresh the manifest of a variant already in place
+        # the source is moved, not copied: a rerun against an emptied source must not wipe the bundle
+        if not (a.variant_dir / "model.onnx").exists():
+            raise SystemExit(f"{a.variant_dir}/model.onnx missing (already packaged? pass --variant-dir {vdir})")
+        if vdir.exists():
+            shutil.rmtree(vdir)
+        vdir.mkdir()
+        for p in [a.variant_dir / "model.onnx", *data]:
+            shutil.move(str(p), vdir / p.name)
+    if a.vision_dir:
+        vis = root / "vision"
+        if a.vision_dir.resolve() != vis.resolve():
+            if not (a.vision_dir / "vision.onnx").exists():
+                raise SystemExit(f"{a.vision_dir}/vision.onnx missing (already packaged? pass --vision-dir {vis})")
+            if vis.exists():
+                shutil.rmtree(vis)
+            vis.mkdir()
+            for p in a.vision_dir.iterdir():
+                if p.name.startswith("vision.onnx"):
+                    shutil.move(str(p), vis / p.name)
+        vdata = sorted((p for p in vis.iterdir() if p.name.startswith("vision.onnx.data")),
+                       key=lambda p: int(p.name.rpartition("_")[2]) if "_" in p.name else 0)
+        vg = onnx.load(str(vis / "vision.onnx"), load_external_data=False).graph
+        manifest["vision"] = {"model": f"{rev}/vision/vision.onnx", "data": [f"{rev}/vision/{p.name}" for p in vdata],
+                              "inputs": [i.name for i in vg.input], "outputs": [o.name for o in vg.output]}
+        if a.vision_parity:
+            manifest["vision"]["parity"] = json.loads(a.vision_parity.read_text())
     g = onnx.load(str(vdir / "model.onnx"), load_external_data=False).graph
     manifest["variants"][a.variant] = {
         "model": f"{rev}/{a.variant}/model.onnx",

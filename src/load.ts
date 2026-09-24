@@ -31,13 +31,16 @@ export interface LoadOptions {
   onProgress?: (p: Progress) => void;
   onPhase?: (phase: LoadPhase) => void;
   sessionOptions?: InferenceSession.SessionOptions;
+  /** load the vision embedder when the bundle has one (default true); false skips its download for text-only use */
+  vision?: boolean;
 }
 
-/** Every file a variant loads besides manifest.json, with its size. */
-export function modelFiles(manifest: JevManifest, variant = Object.keys(manifest.variants)[0]): { path: string; bytes: number }[] {
+/** Every file a variant loads besides manifest.json, with its size (the vision embedder's last, when included). */
+export function modelFiles(manifest: JevManifest, variant = Object.keys(manifest.variants)[0], vision = true): { path: string; bytes: number }[] {
   const v = manifest.variants[variant];
   if (!v) throw new Error(`unknown variant ${variant}; have ${Object.keys(manifest.variants).join(", ")}`);
-  return [manifest.files.tokenizer, manifest.files.tokenizer_config, manifest.files.head, v.model, ...v.data]
+  const vis = vision && manifest.vision ? [manifest.vision.model, ...manifest.vision.data] : [];
+  return [manifest.files.tokenizer, manifest.files.tokenizer_config, manifest.files.head, v.model, ...v.data, ...vis]
     .map((path) => ({ path, bytes: manifest.sizes[path] }));
 }
 
@@ -116,7 +119,8 @@ export async function loadJevOmni(source: ModelSource, o: LoadOptions): Promise<
   o.onPhase?.("manifest");
   const manifest = JSON.parse(new TextDecoder().decode(await read("manifest.json"))) as JevManifest;
   const variant = o.variant ?? Object.keys(manifest.variants)[0];
-  const files = modelFiles(manifest, variant);
+  const withVision = o.vision !== false && !!manifest.vision;
+  const files = modelFiles(manifest, variant, withVision);
   o.onPhase?.("download");
   const data: Uint8Array[] = [];
   for (const f of files) {
@@ -129,20 +133,24 @@ export async function loadJevOmni(source: ModelSource, o: LoadOptions): Promise<
     }
     data.push(bytes);
   }
-  const [tokJson, tokCfg, headBytes, graph, ...weights] = data;
+  const v = manifest.variants[variant];
+  const [tokJson, tokCfg, headBytes, graph, ...rest] = data;
+  const weights = rest.slice(0, v.data.length);
+  const [visionGraph, ...visionWeights] = rest.slice(v.data.length);
   const dec = new TextDecoder();
   const tokenizer = new Tokenizer(JSON.parse(dec.decode(tokJson)), JSON.parse(dec.decode(tokCfg)));
   const head = DecisionHead.fromSafetensors(headBytes.slice().buffer);
   if (head.hidden !== manifest.head.hidden) throw new Error(`head hidden size ${head.hidden} != manifest ${manifest.head.hidden}`);
   o.onPhase?.("session");
-  const v = manifest.variants[variant];
-  const session = await o.ort.InferenceSession.create(graph, {
+  const create = (g: Uint8Array, paths: string[], bufs: Uint8Array[]) => o.ort.InferenceSession.create(g, {
     executionProviders: o.executionProviders ?? ["webgpu"],
     graphOptimizationLevel: "all",
-    externalData: v.data.map((p, i) => ({ path: p.split("/").pop()!, data: weights[i] })),
+    externalData: paths.map((p, i) => ({ path: p.split("/").pop()!, data: bufs[i] })),
     ...o.sessionOptions,
   });
-  data.length = 0; weights.length = 0;
+  const session = await create(graph, v.data, weights);
+  const vision = withVision ? await create(visionGraph, manifest.vision!.data, visionWeights) : null;
+  data.length = 0; weights.length = 0; rest.length = 0;
   o.onPhase?.("ready");
-  return new JevOmni({ ort: o.ort, session, head, tokenizer, manifest, variant });
+  return new JevOmni({ ort: o.ort, session, head, tokenizer, manifest, variant, vision });
 }

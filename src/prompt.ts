@@ -32,3 +32,11 @@ export function pyStrip(s: string): string {
 export function chatText(userText: string): string {
   return `<bos><|turn>user\n${pyStrip(userText)}<turn|>\n<|turn>model\n<|channel>thought\n<channel|>`;
 }
+
+/** One user turn with an image before the text, as the Gemma 4 processor expands it (jev_omni.py's content order):
+ * <|image> + one <|image|> per soft token + <image|>, then the trimmed text. */
+export function imageChatText(userText: string, numSoftTokens: number): string {
+  return `<bos><|turn>user\n<|image>${"<|image|>".repeat(numSoftTokens)}<image|>${pyStrip(userText)}<turn|>\n<|turn>model\n<|channel>thought\n<channel|>`;
+}
+
+export const IMAGE_TOKEN_ID = 258880;

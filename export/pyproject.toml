@@ -18,6 +18,7 @@ dependencies = [
     "huggingface_hub",
     "tqdm",
     "pillow",
+    "torchvision>=0.29.0",
 ]
 
 [tool.uv]
