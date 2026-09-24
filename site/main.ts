@@ -45,7 +45,7 @@ await refreshLoadButton();
 // ---- worker ----
 const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
 const send = (m: WorkerRequest, transfer: Transferable[] = []) => worker.postMessage(m, transfer);
-let ready = false, loadStart = 0, nextId = 1;
+let ready = false, nextId = 1, rateSamples: [number, number][] = [];
 const pending = new Map<number, { resolve: (p: Prediction) => void; reject: (e: Error) => void }>();
 const setBusy = (busy: boolean) => {
   $<HTMLButtonElement>("run").disabled = busy || !ready;
@@ -56,7 +56,7 @@ const setBusy = (busy: boolean) => {
 $("load").onclick = async () => {
   if (!(await isCached(MODEL_URL, manifest!)) &&
       !confirm(`This downloads ${GB(totalBytes)} GB from Hugging Face and keeps it in the browser's cache. The model needs about 16 GB of GPU memory, and the tab holds the files in memory while loading: 32 GB of RAM at the very least, 64 GB or more recommended. Continue?`)) return;
-  ready = false; loadStart = performance.now();
+  ready = false; rateSamples = [];
   setBusy(true);
   $("progress").classList.add("active");
   $("bar").style.width = "0%";
@@ -75,7 +75,13 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
   const m = e.data;
   if (m.type === "progress") {
     $("bar").style.width = `${(100 * m.loaded) / Math.max(m.total, 1)}%`;
-    const secs = (performance.now() - loadStart) / 1000, rate = m.loaded / Math.max(secs, 0.001);
+    // rate over the last ~10 s: cached files arrive at disk speed first and would make an average over the whole load
+    // promise minutes for what the network needs an hour for
+    const now = performance.now();
+    rateSamples.push([now, m.loaded]);
+    while (rateSamples.length > 2 && now - rateSamples[1][0] > 10_000) rateSamples.shift();
+    const [t0, b0] = rateSamples[0];
+    const rate = (m.loaded - b0) / Math.max((now - t0) / 1000, 0.001);
     const left = m.total > m.loaded ? ` · about ${Math.ceil((m.total - m.loaded) / Math.max(rate, 1) / 60)} min left` : "";
     status(`${GB(m.loaded)} / ${GB(m.total)} GB · ${(rate / 1e6).toFixed(0)} MB/s${left}`);
   } else if (m.type === "phase") {
