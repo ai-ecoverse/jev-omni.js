@@ -1,0 +1,39 @@
+name: Publish
+
+# semantic-release on main: version bump, changelog, npm (OIDC trusted publishing, no NPM_TOKEN), GitHub release.
+# The workflow filename must stay release.yaml: npm's trusted publisher matches it exactly.
+# Do not set setup-node registry-url: it writes an .npmrc that breaks semantic-release's OIDC auth.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm install -g npm@latest        # trusted publishing needs npm >= 11.5.1
+      - run: npm run typecheck
+      - run: npm run build:lib
+      # same suite as ci.yml; the parity tests need the bundle and Python runs, which are not in the repo, and skip
+      - run: npm test
+      - run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
