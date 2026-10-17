@@ -39,6 +39,30 @@ res.probabilities; // { Yes: …, No: … }
   8,000 tokens on a GPU with 4 GB buffers. `jev.maxTokens` holds the cap for the current GPU, and longer prompts are
   rejected with an error instead of failing inside the runtime.
 
+## A bundle on disk
+
+`loadJevOmni` also reads a bundle already on disk, in place: pass a directory handle (OPFS, `showDirectoryPicker()`)
+or a function that reads a file by its bundle path instead of a URL. Read that way, every weight file is still held in
+memory before the session is built, and ONNX Runtime copies the weights again while it builds it, so the 13.6 GB
+bundle would peak near twice its size. Two options keep the weights out of loadJevOmni:
+
+- `filePath` (onnxruntime-node) maps a bundle path to a file system path. loadJevOmni opens the decoder and the
+  vision embedder by path, and ONNX Runtime reads the weights beside them itself.
+- `readSync(path, offset, length)` (onnxruntime-web) reads part of a file synchronously. onnxruntime-web asks for
+  each weight's bytes while it builds the session, in no order of files, and loadJevOmni reads just those bytes
+  then, so one tensor at a time is held outside ONNX Runtime. In a worker, OPFS sync access handles do that.
+
+Both read each weight once. The weights they hand over are not hashed (`readSync` checks their sizes): `verify`
+covers the files loadJevOmni reads itself.
+
+```ts
+const jev = await loadJevOmni((path) => readFile(join(dir, path)), { ort, filePath: (path) => join(dir, path) });   // Node
+const jev = await loadJevOmni(opfs, { ort, readSync: (path, at, length) => {                                       // worker
+  const bytes = new Uint8Array(length);
+  return bytes.subarray(0, handles.get(path).read(bytes, { at }));
+} });
+```
+
 To run the demo locally against a bundle in `public/models/jev-omni`: `npm run dev:demo`.
 
 ## Credits

@@ -18,6 +18,10 @@ export type ModelSource = string | FileSystemDirectoryHandle | ReadModelFile;
 
 export type LoadPhase = "manifest" | "download" | "session" | "ready";
 
+/** Reads `length` bytes of one file of a bundle at `offset`, synchronously, by its path in the bundle: an OPFS sync
+ * access handle in a worker, or a virtual file system with sync reads. */
+export type ReadModelFileSync = (path: string, offset: number, length: number) => Uint8Array;
+
 export interface LoadOptions {
   ort: OrtModule;
   /** variant in manifest.variants; default: the first one listed */
@@ -39,6 +43,16 @@ export interface LoadOptions {
   retries?: number;
   /** longest prompt to accept, in tokens; default: what the WebGPU adapter's buffer limit allows (webgpuTokenLimit) */
   maxTokens?: number;
+  /** The file system path of a bundle file, for an ONNX Runtime that opens files itself (onnxruntime-node), local
+   * sources only. The decoder and the vision embedder are created from their graphs' paths and ORT reads their
+   * weights from the files beside them, so loadJevOmni never holds the weights: peak memory stays near the model's
+   * size instead of twice it. Those files are not hashed (`verify` covers the files loadJevOmni reads). */
+  filePath?: (path: string) => string;
+  /** Reads part of a weight file synchronously (onnxruntime-web, local sources). onnxruntime-web asks for each weight's
+   * bytes while it builds the session, in no particular order of files; with this, loadJevOmni reads just those bytes
+   * when ORT asks, instead of every weight file before the session starts, so one tensor at a time is held outside
+   * ORT. Weight files read this way are checked for size, not hashed. */
+  readSync?: ReadModelFileSync;
 }
 
 /** Attention heads of Jev-Omni's decoder (Gemma 4 12B). */
@@ -211,6 +225,21 @@ function urlReader(baseUrl: string, rev: string, o: LoadOptions): FileReader {
   };
 }
 
+/** A weight file onnxruntime-web reads on demand. It keeps each mounted file as given and only takes its byteLength and
+ * subarray(start, end) while it creates the session, so a Uint8Array that reads those bytes at each subarray stands in
+ * for the file. ORT swallows what subarray throws, so `read` records its errors for loadJevOmni to rethrow. */
+class LazyFile extends Uint8Array {
+  constructor(private readonly size: number, private readonly read: (start: number, end: number) => Uint8Array) {
+    super(0);
+  }
+  override get byteLength(): number { return this.size; }
+  override get length(): number { return this.size; }
+  override subarray(start = 0, end = this.size): Uint8Array<ArrayBuffer> {
+    const got = this.read(start, end);
+    return new Uint8Array(got.buffer, got.byteOffset, got.byteLength) as Uint8Array<ArrayBuffer>;
+  }
+}
+
 export async function loadJevOmni(source: ModelSource, o: LoadOptions): Promise<JevOmni> {
   const baseUrl = typeof source === "string" ? source : null;
   o.onPhase?.("manifest");
@@ -234,24 +263,62 @@ export async function loadJevOmni(source: ModelSource, o: LoadOptions): Promise<
   o.onPhase?.("download");
   // announce every file up front so the total does not grow as downloads start
   for (const f of files) o.onProgress?.({ file: f.path, loaded: 0, total: f.bytes });
-  const data = await pool(files.map((f) => () => read(f.path, f.bytes, manifest.sha256[f.path])), o.concurrency ?? 4);
   const v = manifest.variants[variant];
+  // onnxruntime-node opens a graph by path and reads its weights itself; onnxruntime-web reads lazy weights on demand
+  const byPath = baseUrl === null ? o.filePath : undefined;
+  const readSync = baseUrl === null && !byPath ? o.readSync : undefined;
+  const graphs = new Set([v.model, ...(withVision ? [manifest.vision!.model] : [])]);
+  const weightFiles = new Set([...v.data, ...(withVision ? manifest.vision!.data : [])]);
+  let failure: Error | undefined;
+  const failed = (e: unknown) => (failure ??= e instanceof Error ? e : new Error(String(e)));
+  const done = (f: { path: string; bytes: number }) => o.onProgress?.({ file: f.path, loaded: f.bytes, total: f.bytes });
+  const lazy = (f: { path: string; bytes: number }) => {
+    let loaded = 0;
+    return new LazyFile(f.bytes, (start, end) => {
+      let got: Uint8Array;
+      try {
+        got = readSync!(f.path, start, end - start);
+      } catch (e) {
+        throw failed(e);
+      }
+      if (got.byteLength !== end - start) throw failed(new Error(`${f.path}: expected ${f.bytes} bytes, but it ends before byte ${end} (incomplete download?)`));
+      loaded += got.byteLength;
+      o.onProgress?.({ file: f.path, loaded, total: f.bytes });
+      return got;
+    });
+  };
+  const load = async (f: { path: string; bytes: number }): Promise<Uint8Array | string> => {
+    if (byPath && graphs.has(f.path)) { done(f); return byPath(f.path); }
+    if (!weightFiles.has(f.path) || !(byPath || (readSync && f.bytes))) return read(f.path, f.bytes, manifest.sha256[f.path]);
+    if (readSync) return lazy(f);
+    done(f);
+    return "";
+  };
+  const data = await pool(files.map((f) => () => load(f)), o.concurrency ?? 4);
   const [tokJson, tokCfg, headBytes, graph, ...rest] = data;
   const weights = rest.slice(0, v.data.length);
   const [visionGraph, ...visionWeights] = rest.slice(v.data.length);
-  const tokenizer = new Tokenizer(JSON.parse(dec.decode(tokJson)), JSON.parse(dec.decode(tokCfg)));
-  const head = DecisionHead.fromSafetensors(headBytes.slice().buffer);
+  const tokenizer = new Tokenizer(JSON.parse(dec.decode(tokJson as Uint8Array)), JSON.parse(dec.decode(tokCfg as Uint8Array)));
+  const head = DecisionHead.fromSafetensors((headBytes as Uint8Array).slice().buffer);
   if (head.hidden !== manifest.head.hidden) throw new Error(`head hidden size ${head.hidden} != manifest ${manifest.head.hidden}`);
   o.onPhase?.("session");
-  const create = (g: Uint8Array, paths: string[], bufs: Uint8Array[]) => o.ort.InferenceSession.create(g, {
-    executionProviders: o.executionProviders ?? ["webgpu"],
-    graphOptimizationLevel: "all",
-    externalData: paths.map((p, i) => ({ path: p.split("/").pop()!, data: bufs[i] })),
-    ...o.sessionOptions,
-  });
+  const create = async (g: Uint8Array | string, paths: string[], bufs: (Uint8Array | string)[]) => {
+    const options: InferenceSession.SessionOptions = {
+      executionProviders: o.executionProviders ?? ["webgpu"],
+      graphOptimizationLevel: "all",
+      ...(byPath ? {} : { externalData: paths.map((p, i) => ({ path: p.split("/").pop()!, data: bufs[i] as Uint8Array })) }),
+      ...o.sessionOptions,
+    };
+    try {
+      return await (typeof g === "string" ? o.ort.InferenceSession.create(g, options) : o.ort.InferenceSession.create(g, options));
+    } catch (e) {
+      throw failure ?? e;
+    }
+  };
   const session = await create(graph, v.data, weights);
   const vision = withVision ? await create(visionGraph, manifest.vision!.data, visionWeights) : null;
   data.length = 0; weights.length = 0; rest.length = 0;
+  if (readSync) for (const f of files) if (weightFiles.has(f.path) && f.bytes) done(f);
   o.onPhase?.("ready");
   const gpu = (o.executionProviders ?? ["webgpu"]).some((e) => (typeof e === "string" ? e : e.name) === "webgpu");
   const maxTokens = o.maxTokens ?? (gpu ? await webgpuTokenLimit() : undefined);
