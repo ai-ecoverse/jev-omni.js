@@ -67,9 +67,12 @@ function stubOrt(ranges?: Record<string, [number, number][]>) {
       }
       seen.push({ path, isBytes: data instanceof Uint8Array, size: data.byteLength, parts });
     }
-    return { inputNames: ["input_ids"], release: async () => {} };
+    const session = { inputNames: ["input_ids"], released: false, release: async () => { session.released = true; } };
+    sessions.push(session);
+    return session;
   };
-  return { ort: { InferenceSession: { create }, Tensor: ort.Tensor } as unknown as OrtModule, created, seen };
+  const sessions: { released: boolean }[] = [];
+  return { ort: { InferenceSession: { create }, Tensor: ort.Tensor } as unknown as OrtModule, created, seen, sessions };
 }
 
 function reader(files: Map<string, Uint8Array>) {
@@ -136,6 +139,16 @@ test("readSync: a weight file cut short or a failing read fails the load with it
     (e: Error) => e.name === "InvalidStateError",
   );
   await assert.rejects(loadJevOmni(reader(files).read, { ort: stubOrt({}).ort, readSync: () => { throw "no handle"; } }), /^Error: no handle$/);
+});
+
+test("readSync: a failing vision embedder releases the decoder it was loaded with", async () => {
+  const files = await bundle((f) => f.set("r-abc/vision/vision.onnx.data", enc("ey")));
+  const stub = stubOrt({});
+  await assert.rejects(
+    loadJevOmni(reader(files).read, { ort: stub.ort, readSync: (p, at, n) => files.get(p)!.subarray(at, at + n) }),
+    /vision\.onnx\.data: expected 4 bytes, but it ends before byte 4/,
+  );
+  assert.deepEqual(stub.sessions.map((s) => s.released), [true]);
 });
 
 test("without filePath or readSync every file is read, checked and handed over as bytes", async () => {

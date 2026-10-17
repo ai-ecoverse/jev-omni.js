@@ -316,8 +316,15 @@ export async function loadJevOmni(source: ModelSource, o: LoadOptions): Promise<
     }
   };
   const session = await create(graph, v.data, weights);
-  const vision = withVision ? await create(visionGraph, manifest.vision!.data, visionWeights) : null;
-  data.length = 0; weights.length = 0; rest.length = 0;
+  let vision: InferenceSession | null = null;
+  try {
+    // the embedder's weights are read while its session is created: a failure there must not leave the decoder loaded
+    if (withVision) vision = await create(visionGraph, manifest.vision!.data, visionWeights);
+  } catch (e) {
+    await session.release().catch(() => undefined);
+    throw e;
+  }
+  data.length = 0; weights.length = 0; rest.length = 0; visionWeights.length = 0;
   if (readSync) for (const f of files) if (weightFiles.has(f.path) && f.bytes) done(f);
   o.onPhase?.("ready");
   const gpu = (o.executionProviders ?? ["webgpu"]).some((e) => (typeof e === "string" ? e : e.name) === "webgpu");
