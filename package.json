@@ -60,7 +60,7 @@
     "@semantic-release/git": "^11.0.1",
     "@types/node": "^26.0.0",
     "onnxruntime-node": "^1.30.0",
-    "onnxruntime-web": "1.30.0",
+    "onnxruntime-web": "1.31.1",
     "semantic-release": "^25.0.9",
     "tsx": "^4.20.0",
     "typescript": "^7.0.0",
